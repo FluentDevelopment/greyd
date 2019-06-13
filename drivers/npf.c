@@ -35,9 +35,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <net/if.h>
 #include <net/npf.h>
 #include <npf.h>
 #include <stdbool.h>
+
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 #include "../src/failures.h"
 #include "../src/firewall.h"
@@ -50,7 +54,13 @@
 #define NPFDEV_PATH "/dev/npf"
 #define NPFLOG_IF   "npflog0"
 #define TABLE_ID    5
+#define NPF_ACTION_PASS  0 /* PF_PASS */
+#define NPF_ACTION_DROP  1 /* PF_DROP */
+#define NPF_DIR_INOUT    0 /* PF_INOUT */
+#define NPF_DIR_IN       1
+#define NPF_DIR_OUT      2
 
+#define MIN_PFLOG_HDRLEN 45
 #define PCAPSNAP 512
 #define PCAPTIMO 500  /* ms */
 #define PCAPOPTZ 1    /* optimize filter */
@@ -68,6 +78,33 @@
 #if defined(__NetBSD__) && __NetBSD_Version__ <= 799005200
 #   define npf_config_submit(ncf, fd, errinfo) npf_config_submit(ncf, fd)
 #endif
+
+/* Drawn from NetBSD's sys/net/npf/if_npflog.h */
+
+#define NPFLOG_RULESET_NAME_SIZE        16
+
+/*
+ * For now, we use a header compatible with pflog.
+ * This will be improved in the future.
+ */
+struct npfloghdr {
+        uint8_t         length;
+        sa_family_t     af;
+        uint8_t         action;
+        uint8_t         reason;
+        char            ifname[IFNAMSIZ];
+        char            ruleset[NPFLOG_RULESET_NAME_SIZE];
+        uint32_t        rulenr;
+        uint32_t        subrulenr;
+        uint32_t        uid;
+        uint32_t        pid;
+        uint32_t        rule_uid;
+        uint32_t        rule_pid;
+        uint8_t         dir;
+        uint8_t         pad[3];
+};
+
+/* End NetBSD sys/net/npf/if_npflog.h snippet */
 
 struct fw_handle {
     int npfdev;
@@ -180,22 +217,119 @@ Mod_fw_lookup_orig_dst(FW_handle_T handle, struct sockaddr *src,
 void
 Mod_fw_start_log_capture(FW_handle_T handle)
 {
+    struct fw_handle *fwh = handle->fwh;
+    struct bpf_program  bpfp;
+    char *npflog_if, *net_if;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    char filter[PCAPFSIZ] = "ip and port 25 and action pass "
+        "and tcp[13]&0x12=0x2";
+
+    npflog_if = Config_get_str(handle->config, "npflog_if", "firewall",
+                               NPFLOG_IF);
+    net_if = Config_get_str(handle->config, "net_if", "firewall",
+                            NULL);
+
+	if ((fwh->pcap_handle = pcap_open_live(npflog_if, PCAPSNAP, 1, PCAPTIMO,
+                                           errbuf)) == NULL)
+    {
+		i_critical("failed to initialize failed: %s", errbuf);
+    }
+
+    if(pcap_datalink(fwh->pcap_handle) != DLT_PFLOG) {
+        pcap_close(fwh->pcap_handle);
+        fwh->pcap_handle = NULL;
+        i_critical("invalid datalink type");
+    }
+
+    if(net_if != NULL) {
+        sstrncat(filter, " and on ", PCAPFSIZ);
+        sstrncat(filter, net_if, PCAPFSIZ);
+    }
+
+    if((pcap_compile(fwh->pcap_handle, &bpfp, filter, PCAPOPTZ, 0) == -1)
+       || (pcap_setfilter(fwh->pcap_handle, &bpfp) == -1))
+    {
+        i_critical("%s", pcap_geterr(fwh->pcap_handle));
+    }
+
+    pcap_freecode(&bpfp);
+
+    fwh->entries = List_create(destroy_log_entry);
 }
 
 void
 Mod_fw_end_log_capture(FW_handle_T handle)
 {
+    struct fw_handle *fwh = handle->fwh;
+
+    List_destroy(&fwh->entries);
+    pcap_close(fwh->pcap_handle);
 }
 
 List_T
 Mod_fw_capture_log(FW_handle_T handle)
 {
-    return NULL;
+    struct fw_handle *fwh = handle->fwh;
+    pcap_handler ph = packet_received;
+
+    List_remove_all(fwh->entries);
+    pcap_dispatch(fwh->pcap_handle, 0, ph, (u_char *) handle);
+
+    return fwh->entries;
 }
 
 static void
 packet_received(u_char *args, const struct pcap_pkthdr *h, const u_char *sp)
 {
+    FW_handle_T handle = (FW_handle_T) args;
+    struct fw_handle *fwh = handle->fwh;
+    sa_family_t af;
+    u_int8_t hdrlen;
+    u_int32_t caplen = h->caplen;
+    const struct ip *ip = NULL;
+    const struct npfloghdr *hdr;
+    char addr[INET6_ADDRSTRLEN] = { '\0' };
+    int track_outbound;
+
+    track_outbound = Config_get_int(handle->config, "track_outbound",
+                                    "firewall", TRACK_OUTBOUND);
+
+    hdr = (const struct npfloghdr *)sp;
+    if(hdr->length < MIN_PFLOG_HDRLEN) {
+        i_warning("invalid npflog header length (%u/%u). "
+            "packet dropped.", hdr->length, MIN_PFLOG_HDRLEN);
+        return;
+    }
+    hdrlen = BPF_WORDALIGN(hdr->length);
+
+    if(caplen < hdrlen) {
+        i_warning("npflog header larger than caplen (%u/%u). "
+            "packet dropped.", hdrlen, caplen);
+        return;
+    }
+
+    /* We're interested in passed packets */
+    if(hdr->action != NPF_ACTION_PASS)
+        return;
+
+    af = hdr->af;
+    if(af == AF_INET) {
+        ip = (const struct ip *) (sp + hdrlen);
+        if(hdr->dir == NPF_DIR_IN) {
+            inet_ntop(af, &ip->ip_src, addr,
+                      sizeof(addr));
+        }
+        else if(hdr->dir == NPF_DIR_OUT && track_outbound) {
+            inet_ntop(af, &ip->ip_dst, addr,
+                      sizeof(addr));
+        }
+    }
+
+    if(addr[0] != '\0') {
+        i_debug("packet received: direction = %s, addr = %s",
+                (hdr->dir == NPF_DIR_IN ? "in" : "out"), addr);
+        List_insert_after(fwh->entries, strdup(addr));
+    }
 }
 
 static void
