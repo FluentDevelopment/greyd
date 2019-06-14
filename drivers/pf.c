@@ -187,7 +187,7 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
         goto err;
     }
 
-    signal(SIGCHLD, &oldact, NULL);
+    sigaction(SIGCHLD, &oldact, NULL);
 
     return nadded;
 
