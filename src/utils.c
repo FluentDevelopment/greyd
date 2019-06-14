@@ -22,6 +22,7 @@
 #include <config.h>
 
 #include <sys/param.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <errno.h>
