@@ -269,10 +269,12 @@ send_blacklist(FW_handle_T fw, Blacklist_T blacklist, int greyonly,
     cidrs = Blacklist_collapse(blacklist);
 
     if(!greyonly) {
-        /* Append this blacklist's cidrs to the global list. */
-        LIST_EACH(cidrs, entry) {
-            cidr = List_entry_value(entry);
-            List_insert_after(all_cidrs, strdup(cidr));
+        if (List_size(cidrs)) {
+            /* Append this blacklist's cidrs to the global list. */
+            LIST_EACH(cidrs, entry) {
+                cidr = List_entry_value(entry);
+                List_insert_after(all_cidrs, strdup(cidr));
+            }
         }
 
         /*
