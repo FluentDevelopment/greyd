@@ -59,6 +59,16 @@
 #define satosin(sa)  ((struct sockaddr_in *)(sa))
 #define satosin6(sa) ((struct sockaddr_in6 *)(sa))
 
+/*  name argument of npf_table_create was added in NetBSD 699002600 */
+#if defined(__NetBSD__) && __NetBSD_Version__ <= 699002600
+#   define npf_table_create(name, id, type) npf_table_create(id, type)
+#endif
+
+/* errinfo argument of npf_config_submit was added in NetBSD 799005200 */
+#if defined(__NetBSD__) && __NetBSD_Version__ <= 799005200
+#   define npf_config_submit(ncf, fd, errinfo) npf_config_submit(ncf, fd)
+#endif
+
 struct fw_handle {
     int npfdev;
     pcap_t *pcap_handle;
@@ -130,12 +140,12 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
         return 0;
 
     ncf = npf_config_create();
-    nt = npf_table_create(TABLE_ID, NPF_TABLE_HASH);
-    
+    nt = npf_table_create(table, TABLE_ID, NPF_TABLE_HASH);
+
     /* This should somehow be atomic. */
     LIST_EACH(cidrs, entry) {
         if((cidr = List_entry_value(entry)) != NULL
-            && IP_str_to_addr_mask(cidr, &n, &m) != -1) 
+           && IP_str_to_addr_mask(cidr, &n, &m, (sa_family_t*)&af) != -1)
         {
             ret = sscanf(cidr, "%39[^/]/%u", parsed, &maskbits);
             if(ret != 2 || maskbits == 0 || maskbits > IP_MAX_MASKBITS)
@@ -147,7 +157,8 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
     }
 
     npf_table_insert(ncf, nt);
-    npf_config_submit(ncf, fwh->npfdev);
+    /* TODO: handle errors returned from npf_config_submit by passing npf_error_t * */
+    npf_config_submit(ncf, fwh->npfdev, NULL);
     npf_config_destroy(ncf);
     npf_table_destroy(nt);
     nt = NULL;
