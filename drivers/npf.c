@@ -229,10 +229,10 @@ Mod_fw_start_log_capture(FW_handle_T handle)
     net_if = Config_get_str(handle->config, "net_if", "firewall",
                             NULL);
 
-	if ((fwh->pcap_handle = pcap_open_live(npflog_if, PCAPSNAP, 1, PCAPTIMO,
+    if ((fwh->pcap_handle = pcap_open_live(npflog_if, PCAPSNAP, 1, PCAPTIMO,
                                            errbuf)) == NULL)
     {
-		i_critical("failed to initialize failed: %s", errbuf);
+        i_critical("failed to initialize failed: %s", errbuf);
     }
 
     if(pcap_datalink(fwh->pcap_handle) != DLT_PFLOG) {
