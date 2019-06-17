@@ -237,6 +237,8 @@ Mod_fw_start_log_capture(FW_handle_T handle)
     net_if = Config_get_str(handle->config, "net_if", "firewall",
                             NULL);
 
+    i_info("starting npflog %s capture for interface %s", npflog_if, net_if);
+
     if ((fwh->pcap_handle = pcap_open_live(npflog_if, PCAPSNAP, 1, PCAPTIMO,
                                            errbuf)) == NULL)
     {
@@ -298,6 +300,8 @@ packet_received(u_char *args, const struct pcap_pkthdr *h, const u_char *sp)
     const struct npfloghdr *hdr;
     char addr[INET6_ADDRSTRLEN] = { '\0' };
     int track_outbound;
+
+    i_info("got npf packet");
 
     track_outbound = Config_get_int(handle->config, "track_outbound",
                                     "firewall", TRACK_OUTBOUND);
