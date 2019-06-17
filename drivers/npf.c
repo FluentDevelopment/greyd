@@ -138,6 +138,8 @@ Mod_fw_open(FW_handle_T handle)
         return -1;
     }
 
+    i_info("npf device %s successfully opened", npfdev_path);
+
     fwh->npfdev = npfdev;
     fwh->pcap_handle = NULL;
     handle->fwh = fwh;
@@ -179,6 +181,8 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
     ncf = npf_config_create();
     nt = npf_table_create(table, TABLE_ID, NPF_TABLE_HASH);
 
+    i_info("adding entries to npf table %s", table);
+
     /* This should somehow be atomic. */
     LIST_EACH(cidrs, entry) {
         if((cidr = List_entry_value(entry)) != NULL
@@ -188,10 +192,14 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
             if(ret != 2 || maskbits == 0 || maskbits > IP_MAX_MASKBITS)
                 continue;
 
+            //i_info("adding address %s to npf table %s", cidr, table);
+
             npf_table_add_entry(nt, af, (npf_addr_t *) &n, *((npf_netmask_t *) &maskbits));
             nadded++;
         }
     }
+
+    i_info("submitting %d addresses to npf table %s", nadded, table);
 
     npf_table_insert(ncf, nt);
     /* TODO: handle errors returned from npf_config_submit by passing npf_error_t * */
