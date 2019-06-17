@@ -168,18 +168,17 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
     char *table = (char *) set_name;
     void *handler;
     struct List_entry *entry;
-    nl_config_t *ncf;
-    nl_table_t *nt;
     struct IP_addr m, n;
     int ret;
     uint8_t maskbits;
     char parsed[INET6_ADDRSTRLEN];
+    npf_ioctl_table_t nct;
 
     if(List_size(cidrs) == 0)
         return 0;
 
-    ncf = npf_config_create();
-    nt = npf_table_create(table, TABLE_ID, NPF_TABLE_HASH);
+    memset(&nct, 0, sizeof(npf_ioctl_table_t));
+    nct.nct_name = table;
 
     i_info("adding entries to npf table %s", table);
 
@@ -192,22 +191,59 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
             if(ret != 2 || maskbits == 0 || maskbits > IP_MAX_MASKBITS)
                 continue;
 
-            //i_info("adding address %s to npf table %s", cidr, table);
+            /*i_info("adding address %s to npf table %s", cidr, table);*/
 
-            npf_table_add_entry(nt, af, (npf_addr_t *) &n, *((npf_netmask_t *) &maskbits));
-            nadded++;
+            size_t alen;
+            switch (af) {
+            case AF_INET:
+                alen = sizeof(struct in_addr);
+                break;
+            case AF_INET6:
+                alen = sizeof(struct in6_addr);
+                break;
+            default:
+                i_warning("unsupported address family %d", (int)af);
+                continue;
+            }
+
+            nct.nct_data.ent.alen = alen;
+            memcpy(&nct.nct_data.ent.addr, &n, alen);
+            nct.nct_data.ent.mask = NPF_NO_NETMASK; /*maskbits;*/
+
+            nct.nct_cmd = NPF_CMD_TABLE_LOOKUP;
+            if (ioctl(fwh->npfdev, IOC_NPF_TABLE, &nct) != -1) {
+                i_debug("record already exists for %s; skipping", cidr);
+                continue;
+            }
+            if (errno != ENOENT) {
+                i_warning("record already exists for %s; skipping", cidr);
+                continue;
+            }
+
+            nct.nct_cmd = NPF_CMD_TABLE_ADD;
+            if (ioctl(fwh->npfdev, IOC_NPF_TABLE, &nct) != -1) {
+                errno = 0;
+            }
+            switch (errno) {
+            case EEXIST:
+                i_warning("entry already exists or is conflicting: %s", cidr);
+                break;
+            case ENOENT:
+                i_warning("no matching entry was not found");
+            case EINVAL:
+                i_warning("invalid address or mask %s or table ID %s", cidr, table);
+                break;
+            default:
+                if (errno) {
+                    i_warning("ioctl(IOC_NPF_TABLE) returned error %s", strerror(errno));
+                } else {
+                    nadded++;
+                }
+            }
         }
     }
 
     i_info("submitting %d addresses to npf table %s", nadded, table);
-
-    npf_table_insert(ncf, nt);
-    /* TODO: handle errors returned from npf_config_submit by passing npf_error_t * */
-    npf_config_submit(ncf, fwh->npfdev, NULL);
-    npf_config_destroy(ncf);
-    npf_table_destroy(nt);
-    nt = NULL;
-    ncf = NULL;
 
     return nadded;
 
