@@ -216,7 +216,8 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
 
             //i_info("adding address %s to npf table %s", cidr, table);
 
-            npf_table_add_entry(nt, af, (npf_addr_t *) &n, (npf_netmask_t) maskbits);
+            // npf_table_add_entry(nt, af, (npf_addr_t *) &n, (npf_netmask_t) maskbits);
+            npf_table_add_entry(nt, af, (npf_addr_t *) &n, NPF_NO_NETMASK);
             nadded++;
         }
     }
