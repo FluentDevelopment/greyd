@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <net/if.h>
+#define _NPF_PRIVATE
 #include <net/npf.h>
 #include <npf.h>
 #include <stdbool.h>
@@ -178,8 +179,19 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
     if(List_size(cidrs) == 0)
         return 0;
 
-    ncf = npf_config_create();
-    nt = npf_table_create(table, TABLE_ID, NPF_TABLE_HASH);
+    ncf = npf_config_retrieve(fwh->npfdev);
+    while ((nt = npf_table_iterate(ncf)) != NULL) {
+        const char *name = npf_table_getname(nt);
+        i_info("Iterating table %s", name);
+        if (strcmp(name, table) == 0) {
+            i_info("Found table %s", table);
+            break;
+        }
+    }
+    if (!nt) {
+      i_critical("Unable to find table %s; creating new table", table);
+      goto err_config_destroy;
+    }
 
     i_info("adding entries to npf table %s", table);
 
@@ -191,26 +203,45 @@ Mod_fw_replace(FW_handle_T handle, const char *set_name, List_T cidrs, short af)
             ret = sscanf(cidr, "%39[^/]/%u", parsed, &maskbits);
             if(ret != 2 || maskbits == 0 || maskbits > IP_MAX_MASKBITS)
                 continue;
+            if (af != AF_INET) {
+                /* TODO: allow this case if table type == NPF_TABLE_LPM */
+                i_warning("non-IPv4 (%d) address %s not supported", (int)af, cidr);
+                continue;
+            }
+            if (af == AF_INET && maskbits != 32) {
+                /* TODO: allow this case if table type == NPF_TABLE_LPM */
+                i_warning("incorrect mask bits %d on cidr %s", maskbits, cidr);
+                continue;
+            }
 
             //i_info("adding address %s to npf table %s", cidr, table);
 
-            npf_table_add_entry(nt, af, (npf_addr_t *) &n, *((npf_netmask_t *) &maskbits));
+            npf_table_add_entry(nt, af, (npf_addr_t *) &n, (npf_netmask_t) maskbits);
             nadded++;
         }
     }
 
     i_info("submitting %d addresses to npf table %s", nadded, table);
-
-    npf_table_insert(ncf, nt);
-    /* TODO: handle errors returned from npf_config_submit by passing npf_error_t * */
-    npf_config_submit(ncf, fwh->npfdev, NULL);
+    npf_error_t errinfo;
+    memset(&errinfo, 0, sizeof(errinfo));
+    int error;
+    error = npf_config_submit(ncf, fwh->npfdev, &errinfo);
+    if (error == EEXIST) {
+       i_warning("npf config submit failed; possible duplicate table entry?");
+       goto err_config_destroy;
+    } else if (error) {
+       i_warning("npf config submit failed: %s; with ID %" PRIi64, strerror(error), errinfo.id);
+       goto err_config_destroy;
+    }
+    i_info("npf config successfully submitted; error ID %" PRIi64, errinfo.id);
     npf_config_destroy(ncf);
-    npf_table_destroy(nt);
     nt = NULL;
     ncf = NULL;
 
     return nadded;
 
+err_config_destroy:
+    npf_config_destroy(ncf);
 err:
     return -1;
 }
