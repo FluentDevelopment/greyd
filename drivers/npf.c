@@ -391,7 +391,7 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
     in_port_t port[2];
     int dev, af;
     size_t alen;
-
+    int error;
     char srcp[INET6_ADDRSTRLEN], dstp[INET6_ADDRSTRLEN];
 
     switch (af = src->sa_family) {
@@ -428,8 +428,8 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
 
     i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
 
-    if (npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN) == -1) {
-        i_warning("NAT lookup failure: %m", strerror(errno));
+    if ((error = npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN)) != 0) {
+        i_warning("NAT lookup failure: %m - %m", strerror(error), strerror(errno));
         return -1;
     }
 
@@ -438,17 +438,6 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
      * The originating address is already set into nat_addr so fill
      * in the rest, family, port (ident), len....
      */
-    // switch (af) {
-    // case AF_INET:
-    // 	satosin(orig_dst)->sin_len = sizeof(struct sockaddr_in);
-    // 	satosin(orig_dst)->sin_family = AF_INET;
-    // 	break;
-    // case AF_INET6:
-    // 	satosin6(orig_dst)->sin6_len = sizeof(struct sockaddr_in6);
-    // 	satosin6(orig_dst)->sin6_family = AF_INET6;
-    // 	break;
-    // }
-
     switch (af) {
     case AF_INET:
         inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
