@@ -398,11 +398,11 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
     case AF_INET:
         alen = sizeof(*satosin(src));
 
-        inet_ntop(af, &satosin(src)->sin_addr, srcp, sizeof(srcp));
-        inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
-
         /* copy the source into nat_addr so it is writable */
         memcpy(orig_dst, src, sizeof(*satosin(src)));
+
+        inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
+        inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
 
         addr[0] = (void*)&satosin(orig_dst)->sin_addr;
         addr[1] = (void*)&satosin(dst)->sin_addr;
@@ -411,10 +411,13 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         break;
     case AF_INET6:
         alen = sizeof(*satosin6(src));
+
         /* copy the source into nat_addr so it is writable */
         memcpy(orig_dst, src, sizeof(*satosin6(src)));
-        inet_ntop(af, &satosin6(src)->sin6_addr, srcp, sizeof(srcp));
+
+        inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
+
         addr[0] = (void*)&satosin6(orig_dst)->sin6_addr;
         addr[1] = (void*)&satosin6(dst)->sin6_addr;
         port[0] = satosin6(src)->sin6_port;
@@ -429,7 +432,7 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
     i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
 
     if ((error = npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN)) != 0) {
-        i_warning("NAT lookup failure: %m - %m", strerror(error), strerror(errno));
+        i_warning("NAT lookup failure: %m", strerror(errno));
         return -1;
     }
 
