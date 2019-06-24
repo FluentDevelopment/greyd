@@ -426,7 +426,7 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         return -1;
     }
 
-    i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, port[0], dstp, port[1]);
+    i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
 
     if (npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN) == -1) {
         i_warning("NAT lookup failure: %m", strerror(errno));
@@ -453,14 +453,16 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
     case AF_INET:
         inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
+        satosin(orig_dst)->sin_port = port[0];
         break;
     case AF_INET6:
         inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
+        satosin6(orig_dst)->sin6_port = port[0];
         break;
     }
 
-    i_debug("NPF NAT lookup got NAT translation %s:%u -> %s:%u", srcp, port[0], dstp, port[1]);
+    i_debug("NPF NAT lookup got NAT translation %s:%u -> %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
 
     return 0;
 }
