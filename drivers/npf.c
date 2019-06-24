@@ -68,6 +68,8 @@
 
 #define satosin(sa)  ((struct sockaddr_in *)(sa))
 #define satosin6(sa) ((struct sockaddr_in6 *)(sa))
+#define csatosin(sa)  ((const struct sockaddr_in *)(sa))
+#define csatosin6(sa) ((const struct sockaddr_in6 *)(sa))
 
 /*  name argument of npf_table_create was added in NetBSD 699002600 */
 #if defined(__NetBSD__) && __NetBSD_Version__ <= 699002600
@@ -117,6 +119,7 @@ struct fw_handle {
  */
 static void destroy_log_entry(void *);
 static void packet_received(u_char *, const struct pcap_pkthdr *, const u_char *);
+static int npf_natlookup(int, struct sockaddr *, struct sockaddr *, struct sockaddr *);
 
 int
 Mod_fw_open(FW_handle_T handle)
@@ -255,7 +258,9 @@ int
 Mod_fw_lookup_orig_dst(FW_handle_T handle, struct sockaddr *src,
                        struct sockaddr *proxy, struct sockaddr *orig_dst)
 {
-    return -1;
+    struct fw_handle *fwh = handle->fwh;
+
+    return npf_natlookup(fwh->npfdev, src, proxy, orig_dst);
 }
 
 void
@@ -378,6 +383,67 @@ packet_received(u_char *args, const struct pcap_pkthdr *h, const u_char *sp)
                 (hdr->dir == NPF_DIR_IN ? "in" : "out"), addr);
         List_insert_after(fwh->entries, strdup(addr));
     }
+}
+
+static int
+npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
+              struct sockaddr *orig_dst)
+{
+    npf_addr_t *addr[2];
+    in_port_t port[2];
+    int dev, af;
+    size_t alen;
+    int error;
+
+    switch (af = src->sa_family) {
+    case AF_INET:
+        alen = sizeof(*csatosin(src));
+
+        /* copy the source into orig_dst so it is writable */
+        memcpy(orig_dst, dst, sizeof(*csatosin(dst)));
+
+        addr[0] = (void*)&satosin(orig_dst)->sin_addr;
+        addr[1] = (void*)&satosin(src)->sin_addr;
+        port[0] = csatosin(orig_dst)->sin_port;
+        port[1] = csatosin(src)->sin_port;
+        break;
+    case AF_INET6:
+        alen = sizeof(*csatosin6(src));
+
+        /* copy the source into orig_dst so it is writable */
+        memcpy(orig_dst, dst, sizeof(*csatosin6(dst)));
+
+        addr[0] = (void*)&satosin6(orig_dst)->sin6_addr;
+        addr[1] = (void*)&satosin6(src)->sin6_addr;
+        port[0] = csatosin6(orig_dst)->sin6_port;
+        port[1] = csatosin6(src)->sin6_port;
+        break;
+    default:
+        errno = EAFNOSUPPORT;
+        i_warning("NAT lookup for %d: %s", af, strerror(errno));
+        return -1;
+    }
+
+    if ((error = npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN)) != 0) {
+        i_warning("NAT lookup failure: %s", strerror(errno));
+        return -1;
+    }
+
+    // npf_nat_lookup writes the original address into addrs[0]
+    /*
+     * The originating address is already set into nat_addr so fill
+     * in the rest, family, port (ident), len....
+     */
+    switch (af) {
+    case AF_INET:
+        satosin(orig_dst)->sin_port = port[0];
+        break;
+    case AF_INET6:
+        satosin6(orig_dst)->sin6_port = port[0];
+        break;
+    }
+
+    return 0;
 }
 
 static void
