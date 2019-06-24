@@ -117,6 +117,7 @@ struct fw_handle {
  */
 static void destroy_log_entry(void *);
 static void packet_received(u_char *, const struct pcap_pkthdr *, const u_char *);
+static int npf_natlookup(int, struct sockaddr *, struct sockaddr *, struct sockaddr *);
 
 int
 Mod_fw_open(FW_handle_T handle)
@@ -255,7 +256,9 @@ int
 Mod_fw_lookup_orig_dst(FW_handle_T handle, struct sockaddr *src,
                        struct sockaddr *proxy, struct sockaddr *orig_dst)
 {
-    return -1;
+    struct fw_handle *fwh = handle->fwh;
+
+    return npf_natlookup(fwh->npfdev, src, proxy, orig_dst);
 }
 
 void
@@ -378,6 +381,88 @@ packet_received(u_char *args, const struct pcap_pkthdr *h, const u_char *sp)
                 (hdr->dir == NPF_DIR_IN ? "in" : "out"), addr);
         List_insert_after(fwh->entries, strdup(addr));
     }
+}
+
+static int
+npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
+              struct sockaddr *orig_dst)
+{
+    npf_addr_t *addr[2];
+    in_port_t port[2];
+    int dev, af;
+    size_t alen;
+
+    char srcp[INET6_ADDRSTRLEN], dstp[INET6_ADDRSTRLEN];
+
+    switch (af = src->sa_family) {
+    case AF_INET:
+        alen = sizeof(*satosin(src));
+
+        inet_ntop(af, &satosin(src)->sin_addr, srcp, sizeof(srcp));
+        inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
+
+        /* copy the source into nat_addr so it is writable */
+        memcpy(orig_dst, src, sizeof(*satosin(src)));
+
+        addr[0] = (void*)&satosin(orig_dst)->sin_addr;
+        addr[1] = (void*)&satosin(dst)->sin_addr;
+        port[0] = satosin(src)->sin_port;
+        port[1] = satosin(dst)->sin_port;
+        break;
+    case AF_INET6:
+        alen = sizeof(*satosin6(src));
+        /* copy the source into nat_addr so it is writable */
+        memcpy(orig_dst, src, sizeof(*satosin6(src)));
+        inet_ntop(af, &satosin6(src)->sin6_addr, srcp, sizeof(srcp));
+        inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
+        addr[0] = (void*)&satosin6(orig_dst)->sin6_addr;
+        addr[1] = (void*)&satosin6(dst)->sin6_addr;
+        port[0] = satosin6(src)->sin6_port;
+        port[1] = satosin6(dst)->sin6_port;
+        break;
+    default:
+        errno = EAFNOSUPPORT;
+        i_warning("NAT lookup for %d: %m" , af, strerror(errno));
+        return -1;
+    }
+
+    i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, port[0], dstp, port[1]);
+
+    if (npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN) == -1) {
+        i_warning("NAT lookup failure: %m", strerror(errno));
+        return -1;
+    }
+
+    // npf_nat_lookup writes the original address into addrs[0]
+    /*
+     * The originating address is already set into nat_addr so fill
+     * in the rest, family, port (ident), len....
+     */
+    // switch (af) {
+    // case AF_INET:
+    // 	satosin(orig_dst)->sin_len = sizeof(struct sockaddr_in);
+    // 	satosin(orig_dst)->sin_family = AF_INET;
+    // 	break;
+    // case AF_INET6:
+    // 	satosin6(orig_dst)->sin6_len = sizeof(struct sockaddr_in6);
+    // 	satosin6(orig_dst)->sin6_family = AF_INET6;
+    // 	break;
+    // }
+
+    switch (af) {
+    case AF_INET:
+        inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
+        inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
+        break;
+    case AF_INET6:
+        inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
+        inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
+        break;
+    }
+
+    i_debug("NPF NAT lookup got NAT translation %s:%u -> %s:%u", srcp, port[0], dstp, port[1]);
+
+    return 0;
 }
 
 static void
