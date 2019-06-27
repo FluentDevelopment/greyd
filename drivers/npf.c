@@ -68,6 +68,8 @@
 
 #define satosin(sa)  ((struct sockaddr_in *)(sa))
 #define satosin6(sa) ((struct sockaddr_in6 *)(sa))
+#define csatosin(sa)  ((const struct sockaddr_in *)(sa))
+#define csatosin6(sa) ((const struct sockaddr_in6 *)(sa))
 
 /*  name argument of npf_table_create was added in NetBSD 699002600 */
 #if defined(__NetBSD__) && __NetBSD_Version__ <= 699002600
@@ -396,32 +398,32 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
 
     switch (af = src->sa_family) {
     case AF_INET:
-        alen = sizeof(*satosin(src));
+        alen = sizeof(*csatosin(src));
 
-        /* copy the source into nat_addr so it is writable */
-        memcpy(orig_dst, src, sizeof(*satosin(src)));
+        /* copy the source into orig_dst so it is writable */
+        memcpy(orig_dst, src, sizeof(*csatosin(src)));
 
         inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
 
         addr[0] = (void*)&satosin(orig_dst)->sin_addr;
         addr[1] = (void*)&satosin(dst)->sin_addr;
-        port[0] = satosin(src)->sin_port;
-        port[1] = satosin(dst)->sin_port;
+        port[0] = csatosin(orig_dst)->sin_port;
+        port[1] = csatosin(dst)->sin_port;
         break;
     case AF_INET6:
-        alen = sizeof(*satosin6(src));
+        alen = sizeof(*csatosin6(src));
 
-        /* copy the source into nat_addr so it is writable */
-        memcpy(orig_dst, src, sizeof(*satosin6(src)));
+        /* copy the source into orig_dst so it is writable */
+        memcpy(orig_dst, src, sizeof(*csatosin6(src)));
 
         inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
 
         addr[0] = (void*)&satosin6(orig_dst)->sin6_addr;
         addr[1] = (void*)&satosin6(dst)->sin6_addr;
-        port[0] = satosin6(src)->sin6_port;
-        port[1] = satosin6(dst)->sin6_port;
+        port[0] = csatosin6(src)->sin6_port;
+        port[1] = csatosin6(dst)->sin6_port;
         break;
     default:
         errno = EAFNOSUPPORT;
