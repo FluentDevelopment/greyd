@@ -35,6 +35,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <netdb.h>
 #include <net/if.h>
 #include <net/npf.h>
 #include <npf.h>
@@ -70,6 +71,9 @@
 #define satosin6(sa) ((struct sockaddr_in6 *)(sa))
 #define csatosin(sa)  ((const struct sockaddr_in *)(sa))
 #define csatosin6(sa) ((const struct sockaddr_in6 *)(sa))
+
+#define satoaddrport(sa, addr, port) \
+	 getnameinfo((sa), IP_SOCKADDR_LEN((sa)), (addr), sizeof((addr)), (port), sizeof((port)), NI_NUMERICHOST | NI_NUMERICSERV)
 
 /*  name argument of npf_table_create was added in NetBSD 699002600 */
 #if defined(__NetBSD__) && __NetBSD_Version__ <= 699002600
@@ -394,7 +398,8 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
     int dev, af;
     size_t alen;
     int error;
-    char srcp[INET6_ADDRSTRLEN], dstp[INET6_ADDRSTRLEN];
+    char srchost[INET6_ADDRSTRLEN], dsthost[INET6_ADDRSTRLEN];
+    char srcserv[INET6_ADDRSTRLEN], dstserv[INET6_ADDRSTRLEN];
 
     switch (af = src->sa_family) {
     case AF_INET:
@@ -402,9 +407,6 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
 
         /* copy the source into orig_dst so it is writable */
         memcpy(orig_dst, dst, sizeof(*csatosin(dst)));
-
-        inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
-        inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
 
         addr[0] = (void*)&satosin(orig_dst)->sin_addr;
         addr[1] = (void*)&satosin(src)->sin_addr;
@@ -417,9 +419,6 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         /* copy the source into orig_dst so it is writable */
         memcpy(orig_dst, dst, sizeof(*csatosin6(dst)));
 
-        inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
-        inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
-
         addr[0] = (void*)&satosin6(orig_dst)->sin6_addr;
         addr[1] = (void*)&satosin6(src)->sin6_addr;
         port[0] = csatosin6(orig_dst)->sin6_port;
@@ -431,7 +430,10 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         return -1;
     }
 
-    i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
+    satoaddrport(src, srchost, srcserv);
+    satoaddrport(dst, dsthost, dstserv);
+
+    i_debug("NPF NAT lookup entry for connection from %s:%s to %s:%s", srchost, srcserv, dsthost, dstserv);
 
     if ((error = npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN)) != 0) {
         i_warning("NAT lookup failure: %s", strerror(errno));
@@ -445,18 +447,17 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
      */
     switch (af) {
     case AF_INET:
-        inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
-        inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
         satosin(orig_dst)->sin_port = port[0];
         break;
     case AF_INET6:
-        inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
-        inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
         satosin6(orig_dst)->sin6_port = port[0];
         break;
     }
 
-    i_debug("NPF NAT lookup got NAT translation %s:%u -> %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
+    satoaddrport(src, srchost, srcserv);
+    satoaddrport(dst, dsthost, dstserv);
+
+    i_debug("NPF NAT lookup got NAT translation %s:%s -> %s:%s", srchost, srcserv, dsthost, dstserv);
 
     return 0;
 }
