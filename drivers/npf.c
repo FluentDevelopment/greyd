@@ -427,14 +427,14 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         break;
     default:
         errno = EAFNOSUPPORT;
-        i_warning("NAT lookup for %d: %m" , af, strerror(errno));
+        i_warning("NAT lookup for %d: %s", af, strerror(errno));
         return -1;
     }
 
     i_debug("NPF NAT lookup entry for connection from %s:%u to %s:%u", srcp, ntohs(port[0]), dstp, ntohs(port[1]));
 
     if ((error = npf_nat_lookup(npfdev, af, addr, port, IPPROTO_TCP, PFIL_IN)) != 0) {
-        i_warning("NAT lookup failure: %m", strerror(errno));
+        i_warning("NAT lookup failure: %s", strerror(errno));
         return -1;
     }
 
