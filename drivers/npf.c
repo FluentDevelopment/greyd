@@ -401,29 +401,29 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         alen = sizeof(*csatosin(src));
 
         /* copy the source into orig_dst so it is writable */
-        memcpy(orig_dst, src, sizeof(*csatosin(src)));
+        memcpy(orig_dst, dst, sizeof(*csatosin(dst)));
 
         inet_ntop(af, &satosin(orig_dst)->sin_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin(dst)->sin_addr, dstp, sizeof(dstp));
 
         addr[0] = (void*)&satosin(orig_dst)->sin_addr;
-        addr[1] = (void*)&satosin(dst)->sin_addr;
+        addr[1] = (void*)&satosin(src)->sin_addr;
         port[0] = csatosin(orig_dst)->sin_port;
-        port[1] = csatosin(dst)->sin_port;
+        port[1] = csatosin(src)->sin_port;
         break;
     case AF_INET6:
         alen = sizeof(*csatosin6(src));
 
         /* copy the source into orig_dst so it is writable */
-        memcpy(orig_dst, src, sizeof(*csatosin6(src)));
+        memcpy(orig_dst, dst, sizeof(*csatosin6(dst)));
 
         inet_ntop(af, &satosin6(orig_dst)->sin6_addr, srcp, sizeof(srcp));
         inet_ntop(af, &satosin6(dst)->sin6_addr, dstp, sizeof(dstp));
 
         addr[0] = (void*)&satosin6(orig_dst)->sin6_addr;
-        addr[1] = (void*)&satosin6(dst)->sin6_addr;
-        port[0] = csatosin6(src)->sin6_port;
-        port[1] = csatosin6(dst)->sin6_port;
+        addr[1] = (void*)&satosin6(src)->sin6_addr;
+        port[0] = csatosin6(orig_dst)->sin6_port;
+        port[1] = csatosin6(src)->sin6_port;
         break;
     default:
         errno = EAFNOSUPPORT;
