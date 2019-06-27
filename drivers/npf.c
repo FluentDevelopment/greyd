@@ -430,8 +430,8 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         return -1;
     }
 
-    satoaddrport(src, srchost, srcserv);
-    satoaddrport(dst, dsthost, dstserv);
+    satoaddrport(orig_dst, srchost, srcserv);
+    satoaddrport(src, dsthost, dstserv);
 
     i_debug("NPF NAT lookup entry for connection from %s:%s to %s:%s", srchost, srcserv, dsthost, dstserv);
 
@@ -454,8 +454,8 @@ npf_natlookup(int npfdev, struct sockaddr *src, struct sockaddr *dst,
         break;
     }
 
-    satoaddrport(src, srchost, srcserv);
-    satoaddrport(dst, dsthost, dstserv);
+    satoaddrport(orig_dst, srchost, srcserv);
+    satoaddrport(src, dsthost, dstserv);
 
     i_debug("NPF NAT lookup got NAT translation %s:%s -> %s:%s", srchost, srcserv, dsthost, dstserv);
 
